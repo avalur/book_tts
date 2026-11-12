@@ -1,0 +1,24 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local books, generated audio, databases, and model weights
+/data/
+/output/
+/outputs/
+/models/
+/cache/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
