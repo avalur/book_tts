@@ -1,0 +1,2 @@
+# Install in a separate Python 3.11 environment.
+chatterbox-tts>=0.1,<0.2

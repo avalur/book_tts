@@ -1,0 +1,2 @@
+# Install in a separate Python 3.12 environment, not the web app venv.
+qwen-tts>=0.1,<0.2

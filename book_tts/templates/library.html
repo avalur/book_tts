@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="library-heading"><div><div class="eyebrow">ТЕКСТ В ЗВУК</div><h1>Ваша библиотека</h1><p class="muted">Книги, которые удобно слушать. От первой страницы до последней главы.</p></div><span class="book-counter">{{ books|length }} <span>книг в библиотеке</span></span></div>
+<section class="upload-zone" id="uploadZone">
+  <div class="upload-icon" aria-hidden="true">↑</div><div><h2>Добавить книгу</h2><p>Перетащите файл сюда или выберите его на компьютере</p><small>EPUB, FB2, TXT · до 40 МБ</small></div>
+  <label class="button primary file-button">Выбрать файл<input type="file" id="bookFile" accept=".epub,.fb2,.txt"></label>
+  <p id="uploadStatus" role="status" hidden></p>
+</section>
+{% if books %}
+<div class="section-heading"><h2>Все книги</h2><span class="muted">{{ books|length }}</span></div>
+<div class="book-grid">{% for book in books %}
+<a class="book-card" href="/books/{{ book.id }}"><div class="book-spine"><span>{{ 'RU' if book.language == 'ru' else 'EN' }}</span><div>{{ book.title[:1] }}</div><small>BOOK TTS</small></div><div class="book-card-info"><span class="small-label">{{ book.filename.rsplit('.', 1)[-1]|upper }} · {{ book.chapter_count }} глав</span><h3>{{ book.title }}</h3><p>{{ book.author or 'Автор не указан' }}</p><div class="card-bottom"><span class="pill">{{ {'completed':'Готово','running':'Озвучивается','queued':'В очереди','failed':'Нужна проверка','paused':'На паузе','pausing':'Останавливается','cancelled':'Отменено'}.get(book.status, 'К подготовке') }}</span><span aria-hidden="true">↗</span></div></div></a>
+{% endfor %}</div>
+{% else %}
+<section class="empty-state"><span class="empty-lines" aria-hidden="true">▤</span><h2>Здесь будет ваша первая аудиокнига</h2><p>Добавьте текст, выберите голос и послушайте короткую пробу.<br>Готовую книгу можно скачать с навигацией по главам.</p></section>
+{% endif %}
+<div class="how-it-works"><div><span>01</span><h3>Подготовьте текст</h3><p>Проверьте главы, сноски и произношение имён.</p></div><div><span>02</span><h3>Послушайте голос</h3><p>Сначала короткая проба из вашей книги.</p></div><div><span>03</span><h3>Заберите аудиокнигу</h3><p>M4B целиком или MP3 отдельно по главам.</p></div></div>
+{% endblock %}
