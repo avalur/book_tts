@@ -7,12 +7,13 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -23,6 +24,7 @@ from .config import MAX_TEXT, MAX_UPLOAD, Settings
 from .engines import Engines
 from .importers import import_book
 from .store import Conflict, Store
+from .text_export import export_text
 
 PACKAGE = Path(__file__).parent
 
@@ -78,6 +80,7 @@ def create_app(settings: Settings | None = None):
     settings = settings or Settings.load()
     store = Store(settings)
     engines = Engines(settings)
+    export_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -172,20 +175,40 @@ def create_app(settings: Settings | None = None):
         return engines.catalog()
 
     @app.post("/api/books", status_code=201)
-    async def upload(file: UploadFile):
+    async def upload(
+        file: UploadFile, ocr_language: str = Form(default="eng", pattern=r"^(eng|rus|eng\+rus)$")
+    ):
         raw = bytearray()
         while block := await file.read(1024 * 1024):
             raw.extend(block)
             if len(raw) > MAX_UPLOAD:
                 raise HTTPException(413, "Лимит загрузки — 40 МБ")
         filename = Path((file.filename or "book.txt").replace("\\", "/")).name
-        imported = await asyncio.to_thread(import_book, bytes(raw), filename)
+        imported = await asyncio.to_thread(
+            import_book,
+            bytes(raw),
+            filename,
+            cache=settings.data / "pdf-cache",
+            language=ocr_language,
+        )
         book_id = await asyncio.to_thread(store.add_book, imported, filename, bytes(raw))
         return {"id": book_id, "url": f"/books/{book_id}"}
 
     @app.get("/api/books/{book_id}")
     def book_info(book_id: str):
         return store.get_book(book_id)
+
+    @app.get("/books/{book_id}/export/{artifact}")
+    def text_download(
+        book_id: str,
+        artifact: Literal["text.txt", "chapters.zip", "chapters.json", "import-report.json"],
+    ):
+        book = store.get_book(book_id)
+        directory = settings.data / "books" / book_id / "text-exports" / str(book["revision"])
+        with export_lock:
+            if not (directory / "chapters.zip").exists():
+                export_text(book, directory)
+        return FileResponse(directory / artifact, filename=artifact)
 
     @app.put("/api/books/{book_id}")
     def edit_book(book_id: str, edit: BookEdit):

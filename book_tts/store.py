@@ -131,6 +131,10 @@ class Store:
         (directory / "original").write_bytes(raw)
         if book.cover:
             (directory / "cover.jpg").write_bytes(book.cover)
+        if book.import_report:
+            (directory / "import-report.json").write_text(
+                json.dumps(book.import_report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         profile = {
             "engine": "kokoro" if book.language == "en" else "macos",
             "voice": "af_heart" if book.language == "en" else "Milena",
@@ -201,6 +205,10 @@ class Store:
         for chunk in book["chunks"]:
             chunk["warnings"] = json.loads(chunk["warnings"])
         book["has_cover"] = (self.settings.data / "books" / book_id / "cover.jpg").is_file()
+        report = self.settings.data / "books" / book_id / "import-report.json"
+        book["import_report"] = (
+            json.loads(report.read_text(encoding="utf-8")) if report.exists() else None
+        )
         return book
 
     def save_book(self, book_id, data: dict):

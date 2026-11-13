@@ -65,6 +65,10 @@ if (zone) {
         throw new Error("Лимит загрузки — 40 МБ");
       const form = new FormData();
       form.append("file", file);
+      form.append("ocr_language", document.getElementById("ocrLanguage").value);
+      if (file.name.toLowerCase().endsWith(".pdf"))
+        status.textContent =
+          "Извлекаем текст PDF. Для скана выполняется OCR — это может занять несколько минут…";
       const result = await api("/api/books", { method: "POST", body: form });
       location.href = result.url;
     } catch (error) {

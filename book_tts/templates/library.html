@@ -2,8 +2,8 @@
 {% block content %}
 <div class="library-heading"><div><div class="eyebrow">ТЕКСТ В ЗВУК</div><h1>Ваша библиотека</h1><p class="muted">Книги, которые удобно слушать. От первой страницы до последней главы.</p></div><span class="book-counter">{{ books|length }} <span>книг в библиотеке</span></span></div>
 <section class="upload-zone" id="uploadZone">
-  <div class="upload-icon" aria-hidden="true">↑</div><div><h2>Добавить книгу</h2><p>Перетащите файл сюда или выберите его на компьютере</p><small>EPUB, FB2, TXT · до 40 МБ</small></div>
-  <label class="button primary file-button">Выбрать файл<input type="file" id="bookFile" accept=".epub,.fb2,.txt"></label>
+  <div class="upload-icon" aria-hidden="true">↑</div><div><h2>Добавить книгу</h2><p>Перетащите файл сюда или выберите его на компьютере</p><small>PDF, EPUB, FB2, TXT · до 40 МБ</small><label class="pdf-language-label">Язык сканированного PDF<select id="ocrLanguage"><option value="eng">English</option><option value="rus">Русский</option><option value="eng+rus">English + Русский</option></select></label><p class="field-hint">Распознавание скана может занять несколько минут. Дождитесь окончания загрузки.</p></div>
+  <label class="button primary file-button">Выбрать файл<input type="file" id="bookFile" accept=".pdf,.epub,.fb2,.txt"></label>
   <p id="uploadStatus" role="status" hidden></p>
 </section>
 {% if books %}

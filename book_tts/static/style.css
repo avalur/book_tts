@@ -1,3 +1,22 @@
+.pdf-language-label {
+  margin: 12px 0 8px;
+  max-width: 220px;
+}
+.upload-zone .field-hint {
+  margin-top: 6px;
+  max-width: 430px;
+}
+.import-summary {
+  margin-bottom: 24px;
+}
+.export-hint {
+  margin: 12px 0 0;
+}
+.import-warnings {
+  font-size: 13px;
+  color: #97702e;
+  padding-left: 18px;
+}
 :root {
   --bg: #f7f6f2;
   --paper: #fffefa;

@@ -34,6 +34,7 @@ class Book:
     language: str = ""
     chapters: list[Chapter] = field(default_factory=list)
     cover: bytes | None = None
+    import_report: dict | None = None
 
 
 def local(tag: str) -> str:
@@ -251,11 +252,17 @@ def import_epub(raw: bytes, filename: str) -> Book:
         return book
 
 
-def import_book(raw: bytes, filename: str) -> Book:
+def import_book(raw: bytes, filename: str, **pdf_options) -> Book:
     extension = Path(filename).suffix.lower()
-    importer = {".txt": import_txt, ".fb2": import_fb2, ".epub": import_epub}.get(extension)
+    if extension == ".pdf":
+        from .pdf_import import import_pdf
+
+        def importer(data, name):
+            return import_pdf(data, name, **pdf_options)
+    else:
+        importer = {".txt": import_txt, ".fb2": import_fb2, ".epub": import_epub}.get(extension)
     if not importer:
-        raise ValueError("Поддерживаются EPUB, FB2 и TXT")
+        raise ValueError("Поддерживаются PDF, EPUB, FB2 и TXT")
     try:
         book = importer(raw, filename)
     except (
