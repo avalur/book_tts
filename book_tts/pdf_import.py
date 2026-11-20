@@ -13,15 +13,17 @@ import subprocess
 import tempfile
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass, field
-from functools import lru_cache
+from dataclasses import asdict
 from pathlib import Path
 
-from pypdf import PdfReader, mult
+from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
 from .config import MAX_TEXT
 from .importers import Book, Chapter
+from .pdf_layout import english_words, read_bookmarks, text_page
+from .pdf_outline import bookmarked_book
+from .pdf_types import TEXT_VERSION, PdfLine, PdfPage
 from .text import clean_text
 
 EXTRACTION_VERSION = 1
@@ -36,25 +38,6 @@ def write_cache(path: Path, content: bytes):
         temporary.replace(path)
     finally:
         temporary.unlink(missing_ok=True)
-
-
-@dataclass
-class PdfLine:
-    text: str
-    x: float
-    y: float
-    right: float
-    bottom: float
-    confidence: float = 100.0
-    paragraph: str = ""
-
-
-@dataclass
-class PdfPage:
-    number: int
-    lines: list[PdfLine] = field(default_factory=list)
-    method: str = "text"
-    confidence: float | None = None
 
 
 def parse_tsv(tsv: str, page_number: int) -> PdfPage:
@@ -94,39 +77,6 @@ def parse_tsv(tsv: str, page_number: int) -> PdfPage:
         sum(c * n for c, n in confidences) / sum(n for _, n in confidences) if confidences else None
     )
     return PdfPage(page_number, sorted(lines, key=lambda line: (line.y, line.x)), "ocr", mean)
-
-
-def text_page(page, number: int) -> PdfPage:
-    width, height = float(page.mediabox.width), float(page.mediabox.height)
-    lines = []
-
-    def visitor(text, cm, tm, font, size):
-        matrix = mult(tm, cm)
-        x, y = matrix[4] / width, 1 - matrix[5] / height
-        for index, value in enumerate(text.splitlines()):
-            if value.strip():
-                top = y + (index - 1) * size * 1.2 / height
-                lines.append(
-                    PdfLine(
-                        value.strip(),
-                        x,
-                        top,
-                        min(1, x + len(value) * size * 0.5 / width),
-                        top + size / height,
-                    )
-                )
-
-    page.extract_text(0, visitor_text=visitor)
-    # Consecutive fragments on the same baseline belong to one visual line.
-    grouped = []
-    for line in sorted(lines, key=lambda line: (round(line.y, 3), line.x)):
-        if grouped and abs(grouped[-1].y - line.y) < 0.004:
-            previous = grouped[-1]
-            previous.text += " " + line.text
-            previous.right = max(previous.right, line.right)
-        else:
-            grouped.append(line)
-    return PdfPage(number, grouped)
 
 
 def ocr_page(source: Path, number: int, language: str, render_size: int) -> PdfPage:
@@ -199,6 +149,7 @@ def extract_pages(
         metadata = {
             "title": str((reader.metadata or {}).get("/Title", "")).strip(),
             "author": str((reader.metadata or {}).get("/Author", "")).strip(),
+            "bookmarks": read_bookmarks(reader),
         }
     except PyPdfError as error:
         raise ValueError(f"Не удалось прочитать PDF: {error}") from error
@@ -223,11 +174,15 @@ def extract_pages(
                 data = json.loads(cached.read_text())
                 if data["number"] != index:
                     raise ValueError("Номер сохранённой страницы не совпадает")
+                if data["method"] == "text" and data.get("text_version", 0) != TEXT_VERSION:
+                    raise ValueError("Обновлён алгоритм извлечения текстового слоя")
                 pages[index] = PdfPage(
                     data["number"],
                     [PdfLine(**line) for line in data["lines"]],
                     data["method"],
                     data["confidence"],
+                    references=data.get("references", []),
+                    adjustments=data.get("adjustments", []),
                 )
                 continue
             except (ValueError, KeyError, TypeError):
@@ -417,18 +372,11 @@ def strip_margins(pages: list[PdfPage]) -> tuple[list[PdfPage], list[dict]]:
     return result, removed
 
 
-@lru_cache(maxsize=1)
-def english_words():
-    import cmudict
-
-    return set(cmudict.words())
-
-
 def join_lines(lines: list[tuple[int, PdfLine]], changes: list[dict]) -> str:
     """Reflow visual wraps, retain paragraph indents and conservative hard hyphens."""
     if not lines:
         return ""
-    lefts = sorted(line.x for _, line in lines if len(line.text) > 40)
+    lefts = sorted(line.x for _, line in lines if len(line.text) > 40 and not line.continuation)
     margin = lefts[len(lefts) // 10] if lefts else min(line.x for _, line in lines)
     output = []
     previous = None
@@ -444,7 +392,7 @@ def join_lines(lines: list[tuple[int, PdfLine]], changes: list[dict]) -> str:
             prev_page, prev = previous
             page_break = page != prev_page
             typical_height = max(0.008, min(prev.bottom - prev.y, line.bottom - line.y))
-            indented = line.x > margin + 0.018
+            indented = line.x > margin + 0.018 and not line.continuation
             large_gap = not page_break and line.y - prev.bottom > typical_height * 1.05
             paragraph = indented or large_gap
             tail = re.search(r"([A-Za-z]+)-$", output[-1])
@@ -477,6 +425,9 @@ def join_lines(lines: list[tuple[int, PdfLine]], changes: list[dict]) -> str:
 
 def chapters_from_pages(pages: list[PdfPage], info: dict, filename: str) -> Book:
     cleaned, removed = strip_margins(pages)
+    outlined = bookmarked_book(cleaned, info, filename, join_lines)
+    if outlined is not None:
+        return finalize_book(outlined, pages, info, removed)
     candidates = []
     toc_pages = set()
     for page in cleaned:
@@ -637,6 +588,19 @@ def chapters_from_pages(pages: list[PdfPage], info: dict, filename: str) -> Book
             }
         ]
         warnings.append("Надёжные заголовки глав не найдены: текст сохранён одним разделом")
+    book.import_report = {
+        "chapter_count": len(markers),
+        "chapters": spans,
+        "warnings": warnings,
+        "hyphenation_changes": changes,
+        "toc_pages": sorted(toc_pages),
+        "retained_line_count": len(all_lines),
+        "segmentation": "headings",
+    }
+    return finalize_book(book, pages, info, removed)
+
+
+def finalize_book(book: Book, pages: list[PdfPage], info: dict, removed: list[dict]) -> Book:
     if not any(sum(c.isalpha() for c in chapter.text) > 30 for chapter in book.chapters):
         raise ValueError("В PDF не найден читаемый текст. Для скана включите OCR")
     review = [
@@ -650,16 +614,22 @@ def chapters_from_pages(pages: list[PdfPage], info: dict, filename: str) -> Book
     ]
     book.import_report = {
         **{k: v for k, v in info.items() if k != "cache"},
-        "chapter_count": len(markers),
-        "chapters": spans,
-        "warnings": warnings,
         "removed_margins": removed,
-        "hyphenation_changes": changes,
         "review_pages": review,
-        "toc_pages": sorted(toc_pages),
         "method": "ocr" if info.get("ocr_pages") else "text",
-        "retained_line_count": len(all_lines),
-        "notice": "OCR может ошибаться в словах. Уверенность Tesseract не является оценкой точности. Проверьте границы глав и текст перед озвучкой.",
+        "removed_note_markers": [
+            {"page": page.number, **reference} for page in pages for reference in page.references
+        ],
+        "text_adjustments": [
+            {"page": page.number, **adjustment} for page in pages for adjustment in page.adjustments
+        ],
+        "notice": (
+            "OCR может ошибаться в словах. Уверенность Tesseract не является оценкой точности. "
+            if info.get("ocr_pages")
+            else "Текст извлечён из текстового слоя PDF без OCR. "
+        )
+        + "Проверьте границы разделов и текст перед озвучкой. Изменения и исключённые маркеры сносок перечислены в отчёте.",
+        **book.import_report,
     }
     return book
 
